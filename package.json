@@ -1,0 +1,12 @@
+{
+  "name": "paypal-webhook-verifier",
+  "version": "1.0.0",
+  "description": "Verify PayPal webhook signatures",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {}
+}
