@@ -12,7 +12,7 @@ function downloadCert(certUrl) {
     const options = {
       headers: {
         'User-Agent': 'Node.js PayPal Webhook Verifier',
-        'Accept': 'application/pem-certificate-chain',
+        // Removed strict Accept header to avoid 406 error
       },
     };
 
@@ -54,25 +54,27 @@ async function verifyPaypalWebhookSignature({
   // Download the certificate
   const cert = await downloadCert(certUrl);
 
-  // Construct the expected signature string exactly per PayPal spec:
-  // transmissionId|transmissionTime|webhookId|SHA256(webhookEventBody)
+  // Digest algorithm - use sha256 regardless of authAlgo string (PayPal uses SHA256withRSA)
+  const digestAlgorithm = 'sha256';
+
+  // Construct the signature string: transmissionId|transmissionTime|webhookId|SHA256(webhookEventBody)
   const expectedSignatureString = [
     transmissionId,
     transmissionTime,
     webhookId,
-    crypto.createHash('sha256').update(webhookEventBody).digest('hex'),
+    crypto.createHash(digestAlgorithm).update(webhookEventBody).digest('hex'),
   ].join('|');
 
-  // Use Node.js crypto algorithm name for PayPal's SHA256withRSA
-  const verifier = crypto.createVerify('RSA-SHA256');
+  // Create verifier
+  const verifier = crypto.createVerify(digestAlgorithm);
   verifier.update(expectedSignatureString);
   verifier.end();
 
-  // Verify the signature (transmissionSig is base64)
+  // Verify signature (transmissionSig is base64)
   return verifier.verify(cert, transmissionSig, 'base64');
 }
 
-// Create an HTTP server to listen for webhook events
+// HTTP server to receive PayPal webhook POSTs
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(async (req, res) => {
@@ -81,7 +83,7 @@ const server = http.createServer(async (req, res) => {
     return res.end('Not Found');
   }
 
-  // Collect the raw body data as a string
+  // Collect raw request body
   let rawBody = '';
   req.on('data', (chunk) => {
     rawBody += chunk;
@@ -89,15 +91,15 @@ const server = http.createServer(async (req, res) => {
 
   req.on('end', async () => {
     try {
-      // Extract PayPal headers
       const headers = req.headers;
+
       const transmissionId = headers['paypal-transmission-id'];
       const transmissionTime = headers['paypal-transmission-time'];
       const certUrl = headers['paypal-cert-url'];
       const transmissionSig = headers['paypal-transmission-sig'];
       const authAlgo = headers['paypal-auth-algo'];
 
-      // Your PayPal webhook ID (replace with your actual webhook ID)
+      // Your webhook ID from PayPal Developer Dashboard
       const webhookId = '478032838T250025D';
 
       if (!transmissionId || !transmissionTime || !certUrl || !transmissionSig || !authAlgo) {
@@ -105,7 +107,7 @@ const server = http.createServer(async (req, res) => {
         return res.end('Missing required PayPal headers');
       }
 
-      // Verify signature
+      // Verify the signature
       const verified = await verifyPaypalWebhookSignature({
         transmissionId,
         transmissionTime,
