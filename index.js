@@ -1,19 +1,34 @@
 const https = require('https');
 const crypto = require('crypto');
-const url = require('url');
 
-// Function to download PayPal certificate
+// Download PayPal certificate from certUrl (returns PEM string)
 function downloadCert(certUrl) {
   return new Promise((resolve, reject) => {
     https.get(certUrl, (res) => {
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Failed to get cert: ${res.statusCode}`));
+      }
       let data = '';
-      res.on('data', (chunk) => (data += chunk));
+      res.on('data', chunk => data += chunk);
       res.on('end', () => resolve(data));
     }).on('error', reject);
   });
 }
 
-// Function to verify PayPal webhook signature
+/**
+ * Verify PayPal webhook signature.
+ * 
+ * @param {Object} params
+ * @param {string} params.transmissionId - PayPal transmission ID header
+ * @param {string} params.transmissionTime - PayPal transmission time header
+ * @param {string} params.webhookId - Your webhook ID (from PayPal dashboard)
+ * @param {string} params.transmissionSig - PayPal transmission signature (base64)
+ * @param {string} params.authAlgo - PayPal auth algorithm (e.g. "SHA256withRSA")
+ * @param {string} params.certUrl - PayPal certificate URL (starts with https://)
+ * @param {string} params.webhookEventBody - Raw JSON string body of webhook event
+ * 
+ * @returns {Promise<boolean>} true if verified, false if not
+ */
 async function verifyPaypalWebhookSignature({
   transmissionId,
   transmissionTime,
@@ -21,16 +36,25 @@ async function verifyPaypalWebhookSignature({
   transmissionSig,
   authAlgo,
   certUrl,
-  webhookEventBody, // raw JSON string of webhook payload
+  webhookEventBody,
 }) {
-  // Download PayPal certificate
+  // Download cert
   const cert = await downloadCert(certUrl);
 
-  // Construct the expected signature string
-  const expectedSignatureString = `${transmissionId}|${transmissionTime}|${webhookId}|${crypto.createHash('sha256').update(webhookEventBody).digest('hex')}`;
+  // Use 'sha256' digest for Node.js crypto regardless of authAlgo string
+  const digestAlgorithm = 'sha256';
 
-  // Create verifier with auth algorithm
-  const verifier = crypto.createVerify(authAlgo);
+  // Construct expected signature string exactly per PayPal spec:
+  // transmissionId|transmissionTime|webhookId|SHA256(webhookEventBody)
+  const expectedSignatureString = [
+    transmissionId,
+    transmissionTime,
+    webhookId,
+    crypto.createHash(digestAlgorithm).update(webhookEventBody).digest('hex'),
+  ].join('|');
+
+  // Create verifier with the digest algorithm
+  const verifier = crypto.createVerify(digestAlgorithm);
 
   verifier.update(expectedSignatureString);
   verifier.end();
@@ -41,7 +65,7 @@ async function verifyPaypalWebhookSignature({
   return isValid;
 }
 
-// Example usage with dummy data
+// Example usage:
 (async () => {
   const webhookHeaders = {
     'paypal-transmission-id': '7b1bc3a0-84e9-11ee-a463-8a7cfbc2dd89',
@@ -51,11 +75,11 @@ async function verifyPaypalWebhookSignature({
     'paypal-auth-algo': 'SHA256withRSA',
   };
 
-  const webhookId = '478032838T250025D'; // your PayPal webhook ID
+  const webhookId = '478032838T250025D'; // Your PayPal webhook ID
 
-  // This should be the exact raw JSON string body you received
+  // This should be the exact raw JSON string body you received from PayPal webhook
   const webhookEventBody = JSON.stringify({
-    // your webhook payload object here
+    // ... your webhook payload here
   });
 
   try {
