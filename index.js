@@ -4,7 +4,13 @@ const crypto = require('crypto');
 // Download PayPal certificate from certUrl (returns PEM string)
 function downloadCert(certUrl) {
   return new Promise((resolve, reject) => {
-    https.get(certUrl, (res) => {
+    const options = {
+      headers: {
+        'User-Agent': 'Node.js PayPal Webhook Verifier',
+        'Accept': 'application/x-pem-file, */*',
+      },
+    };
+    https.get(certUrl, options, (res) => {
       if (res.statusCode !== 200) {
         return reject(new Error(`Failed to get cert: ${res.statusCode}`));
       }
@@ -14,6 +20,7 @@ function downloadCert(certUrl) {
     }).on('error', reject);
   });
 }
+
 
 /**
  * Verify PayPal webhook signature.
