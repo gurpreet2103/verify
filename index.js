@@ -1,6 +1,6 @@
 const https = require('https');
 const crypto = require('crypto');
-const http = require('http'); // To create a test server
+const http = require('http');
 
 /**
  * Download PayPal certificate from certUrl (returns PEM string)
@@ -12,7 +12,7 @@ function downloadCert(certUrl) {
     const options = {
       headers: {
         'User-Agent': 'Node.js PayPal Webhook Verifier',
-        'Accept': 'application/x-pem-file, */*',
+        'Accept': 'application/pem-certificate-chain',
       },
     };
 
@@ -54,28 +54,25 @@ async function verifyPaypalWebhookSignature({
   // Download the certificate
   const cert = await downloadCert(certUrl);
 
-  // Digest algorithm - use sha256 regardless of authAlgo string (PayPal uses SHA256withRSA)
-  const digestAlgorithm = 'sha256';
-
-  // Construct the signature string: transmissionId|transmissionTime|webhookId|SHA256(webhookEventBody)
+  // Construct the expected signature string exactly per PayPal spec:
+  // transmissionId|transmissionTime|webhookId|SHA256(webhookEventBody)
   const expectedSignatureString = [
     transmissionId,
     transmissionTime,
     webhookId,
-    crypto.createHash(digestAlgorithm).update(webhookEventBody).digest('hex'),
+    crypto.createHash('sha256').update(webhookEventBody).digest('hex'),
   ].join('|');
 
-  // Create verifier
-  const verifier = crypto.createVerify(digestAlgorithm);
+  // Use Node.js crypto algorithm name for PayPal's SHA256withRSA
+  const verifier = crypto.createVerify('RSA-SHA256');
   verifier.update(expectedSignatureString);
   verifier.end();
 
-  // Verify signature (transmissionSig is base64)
+  // Verify the signature (transmissionSig is base64)
   return verifier.verify(cert, transmissionSig, 'base64');
 }
 
-// Example usage with an HTTP server that listens for PayPal webhook events
-// This simulates receiving a webhook and verifying it
+// Create an HTTP server to listen for webhook events
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(async (req, res) => {
@@ -84,7 +81,7 @@ const server = http.createServer(async (req, res) => {
     return res.end('Not Found');
   }
 
-  // Collect raw body as a string
+  // Collect the raw body data as a string
   let rawBody = '';
   req.on('data', (chunk) => {
     rawBody += chunk;
@@ -92,7 +89,7 @@ const server = http.createServer(async (req, res) => {
 
   req.on('end', async () => {
     try {
-      // Extract required headers from the webhook request
+      // Extract PayPal headers
       const headers = req.headers;
       const transmissionId = headers['paypal-transmission-id'];
       const transmissionTime = headers['paypal-transmission-time'];
@@ -100,7 +97,7 @@ const server = http.createServer(async (req, res) => {
       const transmissionSig = headers['paypal-transmission-sig'];
       const authAlgo = headers['paypal-auth-algo'];
 
-      // Your webhook ID from PayPal Dashboard
+      // Your PayPal webhook ID (replace with your actual webhook ID)
       const webhookId = '478032838T250025D';
 
       if (!transmissionId || !transmissionTime || !certUrl || !transmissionSig || !authAlgo) {
@@ -136,5 +133,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
-  console.log('Send PayPal webhook POST requests to http://localhost:' + PORT + '/webhook');
+  console.log(`Send PayPal webhook POST requests to http://localhost:${PORT}/webhook`);
 });
